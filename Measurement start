@@ -1,0 +1,217 @@
+#!/usr/bin/env python3
+"""
+PalmSens MethodSCRIPT console example
+
+This example demonstrates how to communicate with a MethodSCRIPT capable
+PalmSens instrument, such as the EmStat Pico.
+
+The following features are demonstrated in this example:
+  - Auto-detecting the serial port.
+  - Connecting to the device using the serial port.
+  - Reading the firmware version and device type.
+  - Reading a MethodSCRIPT from file and executing it on the device. The
+    MethodSCRIPT used in this example performs a Cyclic Voltammetry (CV)
+    measurement.
+  - Receiving and interpreting the response from the device (i.e., the data
+    packages) and printing the measurement data to the console.
+
+-------------------------------------------------------------------------------
+Copyright (c) 2019-2021 PalmSens BV
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+   - Redistributions of source code must retain the above copyright notice,
+     this list of conditions and the following disclaimer.
+   - Neither the name of PalmSens BV nor the names of its contributors
+     may be used to endorse or promote products derived from this software
+     without specific prior written permission.
+   - This license does not release you from any requirement to obtain separate
+     licenses from 3rd party patent holders to use this software.
+   - Use of the software either in source or binary form must be connected to,
+     run on or loaded to an PalmSens BV component.
+
+DISCLAIMER: THIS SOFTWARE IS PROVIDED BY PALMSENS "AS IS" AND ANY EXPRESS OR
+IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+EVENT SHALL THE REGENTS AND CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA,
+OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
+EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+"""
+
+# Standard library imports
+import logging
+import sys
+import os
+import os.path
+import datetime
+import requests
+# Local imports
+import palmsens.instrument
+import palmsens.mscript
+import palmsens.serial
+import tkinter as tk
+from tkinter import filedialog
+from tkinter import scrolledtext
+import subprocess
+import matplotlib.pyplot as plt
+
+OUTPUT_PATH = 'output'
+def main():
+    ###############################################################################
+    # Following Code starts the palmsense with the settings laid out above
+    ###############################################################################
+
+    # COM port of the MethodSCRIPT device (None = auto-detect).
+    # In case auto-detection does not work or is not wanted, fill in the correct
+    # port name, e.g. 'COM6' on Windows, or '/dev/ttyUSB0' on Linux.
+    # DEVICE_PORT = 'COM6'
+    DEVICE_PORT = None
+
+    # Location of MethodSCRIPT file to use.
+    ###############################################################################
+    # End of configuration
+    ###############################################################################
+
+    LOG = logging.getLogger(__name__)
+
+    def main():
+        """Run the example."""
+        # Configure the logging.
+        logging.basicConfig(level=logging.DEBUG, format='[%(module)s] %(message)s',
+                            stream=sys.stdout)
+        # Uncomment the following line to reduce the log level for our library.
+        # logging.getLogger('palmsens').setLevel(logging.INFO)
+        # Disable excessive logging from matplotlib.
+        logging.getLogger('matplotlib').setLevel(logging.INFO)
+        logging.getLogger('PIL.PngImagePlugin').setLevel(logging.INFO)
+
+        port = DEVICE_PORT
+        if port is None:
+            port = palmsens.serial.auto_detect_port()
+
+        # Create and open serial connection to the device.
+        with palmsens.serial.Serial(port, 1) as comm:
+            device = palmsens.instrument.Instrument(comm)
+            device_type = device.get_device_type()
+            LOG.info('Connected to %s.', device_type)
+
+            # Read and send the MethodSCRIPT file.
+            LOG.info('Sending MethodSCRIPT.')
+            device.send_script(MSCRIPT_FILE_PATH)
+
+            # Read the result lines.
+            LOG.info('Waiting for results.')
+            result_lines = device.readlines_until_end()
+
+        # Store results in file.
+        os.makedirs(OUTPUT_PATH, exist_ok=True)
+        result_file_path = os.path.join(OUTPUT_PATH, result_file_name)
+        with open(result_file_path, 'wt', encoding='ascii') as file:
+            file.writelines(result_lines)
+        # Parse the results
+
+        global curves
+        curves = palmsens.mscript.parse_result_lines(result_lines)
+
+        # Log the results.
+        for curve in curves:
+            for package in curve:
+                LOG.info([str(value) for value in package])
+
+
+    if __name__ == '__main__':
+        main()
+
+
+def run_CV():
+    global MSCRIPT_FILE_PATH
+    MSCRIPT_FILE_PATH = ''
+    root.destroy()
+    global result_file_name
+    result_file_name = datetime.datetime.now().strftime('ms_plot_cv_%Y%m%d-%H%M%S.txt')
+    main()
+
+    applied_potential = palmsens.mscript.get_values_by_column(curves, 0)
+    # Get the measured currents (second column of each row)
+    measured_current = palmsens.mscript.get_values_by_column(curves, 1)
+
+    # Plot the results.
+    plt.figure(1)
+    plt.plot(applied_potential, measured_current)
+    plt.title('Voltammogram')
+    plt.xlabel('Applied Potential (V)')
+    plt.ylabel('Measured Current (A)')
+    plt.grid(visible=True, which='major', linestyle='-')
+    plt.grid(visible=True, which='minor', linestyle='--', alpha=0.2)
+    plt.minorticks_on()
+    plt.show()
+
+def run_SWV():
+    global MSCRIPT_FILE_PATH
+    MSCRIPT_FILE_PATH = ''
+    root.destroy()
+    global result_file_name
+    result_file_name = datetime.datetime.now().strftime('ms_plot_SWV_%Y%m%d-%H%M%S.txt')
+    main()
+    # Plot the results.
+    plt.figure(1)
+    plt.plot(applied_potential, measured_current)
+    plt.title('Voltammogram')
+    plt.xlabel('Applied Potential (V)')
+    plt.ylabel('Measured Current (A)')
+    plt.grid(visible=True, which='major', linestyle='-')
+    plt.grid(visible=True, which='minor', linestyle='--', alpha=0.2)
+    plt.minorticks_on()
+    plt.show()
+
+def fetch_instructions():
+    url = "https://github.com/Bratcat69/MethodScript/blob/main/Measurement"
+    save_as = "measurement.mscr"
+
+    try:
+        # Fetch the script content
+        response = requests.get(url)
+        response.raise_for_status()  # Raise an error for HTTP issues
+
+        # Write content to a local file
+        with open(save_as, "w") as file:
+            file.write(response.text)
+
+        print(f"Script saved as {save_as}")
+    except requests.exceptions.RequestException as e:
+        print(f"Failed to fetch the script: {e}")
+
+
+
+root = tk.Tk()
+root.title("Main Application")
+
+# Frame for buttons
+button_frame = tk.Frame(root)
+button_frame.pack(pady=20)
+
+# Add buttons to the frame
+run_button = tk.Button(button_frame, text="Run CV", command=run_CV)
+run_button.pack(side="left", padx=10)
+
+run_button = tk.Button(button_frame, text="Run SWV", command=run_SWV)
+run_button.pack(side="right", padx=10)
+
+run_button = tk.Button(button_frame, text="fetch instructions", command=fetch_instructions)
+run_button.pack(side="left", padx=10)
+
+# Scrolled text widget for console output
+console = scrolledtext.ScrolledText(root, width=50, height=15, wrap=tk.WORD)
+console.pack(pady=10)
+
+root.mainloop()
+
+
+
+
